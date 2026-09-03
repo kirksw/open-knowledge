@@ -6,7 +6,7 @@ description: "Operator handbook for the issue-driven knowledge agent pipeline."
 
 # Agent Pipeline
 
-This page documents the implemented system designed in [the automation plan](knowledge-agent-automation-plan.md): trusted GitHub issues become reviewable pull requests containing a source record, a knowledge summary, and an optional output artifact.
+This page documents the implemented system designed in [the automation plan](knowledge-agent-automation-plan.md): trusted GitHub issues become reviewable pull requests containing a source record, a question-first knowledge summary, reusable concept pages, and an optional output artifact.
 The agent never merges a pull request.
 
 ## Lifecycle
@@ -19,7 +19,7 @@ Owner opens a *Knowledge entry* issue (issue form)
   -> coordinator parses the form into request.json, or asks one clarification
   -> deterministic SSRF-guarded fetch of the requested sources
   -> research agent writes a dossier (no network, read/write tools only)
-  -> synthesis agent stages the record and summary, or asks one clarification
+  -> synthesis agent stages the record, question-first summary, and concept pages, or asks one clarification
   -> optional output agent stages the requested artifact
   -> deterministic validation emits the approved manifest
   -> deterministic publisher opens a pull request and comments
@@ -69,7 +69,7 @@ Jobs in `.github/workflows/knowledge-agent.yml`, each with least-privilege `GITH
 | `coordinator` | `contents: read` | Deterministic Python; parses the issue form into `request.json` or `clarification.json`. |
 | `clarify` | `contents: read`, `issues: write` | Posts the single question; swaps `agent:working` for `agent:needs-info`. |
 | `research` | `contents: read` | Deterministic fetch (see below), then one headless Pi session with only `read`/`write` tools. |
-| `synthesis` | `contents: read` | Headless Pi; stages `sources/<slug>.md` and `docs/<slug>.md` plus `draft.json`. |
+| `synthesis` | `contents: read` | Headless Pi; stages `sources/<slug>.md`, `docs/<slug>.md`, 1-8 `concepts/<slug>.md` pages, plus `draft.json`. |
 | `output` | `contents: read` | Headless Pi; only when the issue requested an output document. |
 | `validate` | `contents: read` | Deterministic validator; emits `manifest.json` with approved paths and hashes. |
 | `publish` | `contents: write`, `pull-requests: write`, `issues: write` | Deterministic publisher; branch, commit, pull request, comment, labels. |
@@ -88,7 +88,7 @@ Cloudflare and LiteLLM secrets are injected only into the three Pi jobs and the 
   It enforces http(s) on ports 80/443, rejects non-global DNS answers (private, loopback, link-local, metadata, CGNAT, multicast, reserved), pins validated answers for the connection to close DNS rebinding, follows at most four revalidated redirects, and caps sizes and timeouts.
   The Pi stages themselves have no network or shell tools at all (`--tools read,write`).
 - **Least privilege per stage**: the coordinator cannot mutate Git; research writes one dossier; synthesis and output write only staged files; validation is read-only; only the publisher gets write credentials, and it copies only manifest-listed, hash-verified paths.
-- **Publisher limits**: it never merges, never touches `.github/`, never overwrites existing files, and generates commit messages, pull request bodies, and comments from fixed templates.
+- **Publisher limits**: it never merges, never touches `.github/`, never overwrites existing files except concept pages that stay `Concept`-typed and keep every previously recorded source, and generates commit messages, pull request bodies, and comments from fixed templates.
 - **Model access**: Pi reaches LiteLLM through the Access hostname with the service-token headers; the generated provider config lives only in the ephemeral runner home.
 
 ## Implementation notes and deviations
@@ -97,6 +97,8 @@ Cloudflare and LiteLLM secrets are injected only into the three Pi jobs and the 
   This implementation instead fetches deterministically before the agent runs, because the runner cannot enforce an egress policy around arbitrary in-session fetch tools.
   The research agent analyzes the local corpus; broadening discovery (for example a server-side search API behind the same guard) remains future work.
 - Output documents are Markdown (`.md`) or plain text (`.txt`) only; the validator rejects other formats and binaries.
+- The knowledge model decomposes knowledge along concepts: every run extracts or updates 1-8 `Concept` pages under `concepts/`, and summaries lead with the answer to the issue's angle rather than a source description.
+  `sources/`, `docs/`, and `outputs/` stay append-only; only concept pages may be updated, and only when they keep every previously recorded source (the deterministic accumulation guarantee).
 - `mark-working` and `notify-failed` are small extra jobs beyond the plan's table so label changes stay minimal-privilege and failures always leave issue feedback.
 - Pi is installed from npm as `@earendil-works/pi-coding-agent` at a pinned exact version (`PI_VERSION` in the workflow), with pinned full-SHA action versions throughout.
 
@@ -115,7 +117,7 @@ Live tests to perform after setup:
    Then label an owner issue; the run must stop at the gate unless every condition holds.
 2. **Smoke check**: run the smoke workflow; it must succeed without echoing secrets.
 3. **End to end (plan phase 8)**: open a harmless issue (for example one stable documentation page), apply `knowledge:ready`, and require a manual pull request review before merge.
-   Verify the pull request contains exactly the deliverables, the source record links the issue, the summary links the record, and validation output is clean.
+   Verify the pull request contains exactly the deliverables plus concept pages, the source record links the issue, the summary links the record and its concepts, and validation output is clean.
 
 ## Troubleshooting
 

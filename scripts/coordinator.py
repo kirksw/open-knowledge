@@ -170,7 +170,7 @@ def slugify(title: str, issue_number: int, repo_root: Path) -> str:
         slug = text if attempt == 0 else f"{text}-{issue_number + attempt - 1}"
         clash = any(
             (repo_root / directory / f"{slug}{ext}").exists()
-            for directory in ("sources", "docs", "outputs")
+            for directory in ("sources", "docs", "concepts", "outputs")
             for ext in (".md", ".txt")
         )
         if not clash:

@@ -286,17 +286,17 @@ sources:
     title: "Attention Is All You Need"
 ---
 
-# Takeaway
+# Answer
 
-Self-attention works better than recurrence.
+Self-attention works better than recurrence for sequence transduction [^primary].
 
-# What it is
+# Key concepts
+
+- [Self-attention replaces recurrence](/concepts/self-attention-replaces-recurrence.md)
+
+# Evidence
 
 An architecture based on attention [^primary].
-
-# Why it matters
-
-It enabled modern language models.
 
 # Caveats
 
@@ -309,8 +309,47 @@ Interpretation is the author's.
 [^primary]: Attention Is All You Need - https://arxiv.example/abs/1706.03762
 """
 
+GOOD_CONCEPT = """---
+type: Concept
+title: "Self-attention replaces recurrence"
+statement: "Sequence models built on self-attention outperform recurrent architectures."
+tags: []
+status: draft
+generated:
+  by: knowledge-agent
+  at: 2026-09-03T10:00:00Z
+sources:
+  - id: record
+    resource: "/sources/attention-is-all-you-need.md"
+    title: "Attention Is All You Need"
+  - id: primary
+    resource: "https://arxiv.example/abs/1706.03762"
+    title: "Attention Is All You Need"
+related:
+---
 
-def make_fixtures(tmp: Path, record=GOOD_RECORD, summary=GOOD_SUMMARY, output_doc=None):
+# Statement
+
+Self-attention replaces recurrence.
+
+# Evidence
+
+- The paper reports better results than recurrent baselines [^primary].
+
+# Caveats
+
+Single-source evidence so far.
+
+# Related
+
+- [Held-out evaluation](/concepts/held-out-evaluation.md)
+
+[^primary]: Attention Is All You Need - https://arxiv.example/abs/1706.03762
+"""
+
+
+def make_fixtures(tmp: Path, record=GOOD_RECORD, summary=GOOD_SUMMARY, output_doc=None,
+                   concept=GOOD_CONCEPT):
     work = tmp / ".work"
     request = {
         "version": 1,
@@ -335,6 +374,9 @@ def make_fixtures(tmp: Path, record=GOOD_RECORD, summary=GOOD_SUMMARY, output_do
     (staged / "docs").mkdir(parents=True)
     (staged / "sources" / "attention-is-all-you-need.md").write_text(record)
     (staged / "docs" / "attention-is-all-you-need.md").write_text(summary)
+    if concept is not None:
+        (staged / "concepts").mkdir(parents=True)
+        (staged / "concepts" / "self-attention-replaces-recurrence.md").write_text(concept)
     if output_doc is not None:
         (staged / "outputs").mkdir(parents=True)
         (staged / "outputs" / "attention-table.txt").write_text(output_doc)
@@ -360,7 +402,7 @@ class ValidatorTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
             manifest = json.loads((work / "manifest.json").read_text())
             self.assertEqual(manifest["validation"], "approved")
-            self.assertEqual(len(manifest["files"]), 2)
+            self.assertEqual(len(manifest["files"]), 3)  # record, summary, concept
             self.assertEqual(manifest["branch"], "knowledge/7-attention-is-all-you-need")
             self.assertEqual(manifest["caveats"], ["review licensing"])
 
@@ -441,6 +483,54 @@ class ValidatorTests(unittest.TestCase):
             proc = self.run_validate(work, repo)
             self.assertEqual(proc.returncode, 1)
             self.assertIn("binary content", proc.stdout)
+
+    def test_requires_at_least_one_concept(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work, repo = make_fixtures(Path(tmp), concept=None)
+            proc = self.run_validate(work, repo)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("between 1 and 8 concept pages", proc.stdout)
+
+    def test_concept_update_accumulates_sources(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work, repo = make_fixtures(Path(tmp))
+            # Existing concept on the default branch with one recorded source.
+            existing = repo / "concepts"
+            existing.mkdir()
+            (existing / "self-attention-replaces-recurrence.md").write_text(GOOD_CONCEPT)
+            # Staged update adds a second source: allowed.
+            added = GOOD_CONCEPT.replace(
+                '  - id: primary\n    resource: "https://arxiv.example/abs/1706.03762"\n    title: "Attention Is All You Need"\nrelated:',
+                '  - id: primary\n    resource: "https://arxiv.example/abs/1706.03762"\n    title: "Attention Is All You Need"\n  - id: s2\n    resource: "/sources/second-paper.md"\n    title: "Second Paper"\nrelated:',
+            )
+            (work / "staged" / "concepts" / "self-attention-replaces-recurrence.md").write_text(added)
+            proc = self.run_validate(work, repo)
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+
+    def test_concept_update_rejects_dropped_source(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work, repo = make_fixtures(Path(tmp))
+            existing = repo / "concepts"
+            existing.mkdir()
+            fuller = GOOD_CONCEPT.replace(
+                'related:',
+                '  - id: s2\n    resource: "/sources/second-paper.md"\n    title: "Second Paper"\nrelated:',
+            )
+            (existing / "self-attention-replaces-recurrence.md").write_text(fuller)
+            proc = self.run_validate(work, repo)  # staged fixture drops s2
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("must not drop previously recorded sources", proc.stdout)
+
+    def test_rejects_non_concept_overwrite_in_concepts_dir(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work, repo = make_fixtures(Path(tmp))
+            existing = repo / "concepts"
+            existing.mkdir()
+            (existing / "self-attention-replaces-recurrence.md").write_text(
+                "---\ntype: Reference\ntitle: x\ndescription: x\n---\n")
+            proc = self.run_validate(work, repo)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("refusing to overwrite a non-Concept file", proc.stdout)
 
     def test_labeled_content_hash_allowed_as_provenance(self):
         digest = "0bbc8ed36a571a31bea861747c91722946b67c5fa352eb4bd39bb9aa94c73f93"

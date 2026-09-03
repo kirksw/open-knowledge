@@ -5,7 +5,8 @@ A public reference library for papers, projects, and durable syntheses, maintain
 ## Contents
 
 - [Source records](sources/) - provenance records for requested sources and issues.
-- [Knowledge summaries](docs/) - reader-facing syntheses and repository documentation.
+- [Knowledge summaries](docs/) - question-first syntheses and repository documentation.
+- [Concepts](concepts/) - atomic, reusable claims that accumulate evidence across sources.
 - [Update log](log.md) - history of library changes.
 
 ## How entries are added

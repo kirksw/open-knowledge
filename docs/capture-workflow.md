@@ -17,7 +17,11 @@ Do not copy full copyrighted papers, paywalled articles, or confidential materia
 ## Synthesize
 
 Create a `Knowledge Summary` in `docs/` from `templates/wiki-page.md` when the capture is useful beyond its original encounter.
-The summary must link to its source record, name its primary sources in frontmatter, distinguish source claims from interpretation, and use a `draft` status until reviewed.
+The summary is question-first: it opens with the answer to the originating question, links its key concepts, then carries evidence.
+It must link to its source record, name its primary sources in frontmatter, distinguish source claims from interpretation, and use a `draft` status until reviewed.
+
+Extract or update `Concept` pages in `concepts/` from `templates/concept.md` for claims that other entries can reuse.
+A concept update adds sources and evidence; it must not drop a source already recorded on the page.
 Requested artifacts belong in `outputs/` as Markdown or plain text.
 
 ## Curate
