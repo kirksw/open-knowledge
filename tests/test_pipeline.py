@@ -442,6 +442,26 @@ class ValidatorTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 1)
             self.assertIn("binary content", proc.stdout)
 
+    def test_labeled_content_hash_allowed_as_provenance(self):
+        digest = "0bbc8ed36a571a31bea861747c91722946b67c5fa352eb4bd39bb9aa94c73f93"
+        record = GOOD_RECORD.replace(
+            "# Notes",
+            f"# Notes\n\nFetched page sha256 `{digest}` recorded for provenance.",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            work, repo = make_fixtures(Path(tmp), record=record)
+            proc = self.run_validate(work, repo)
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+
+    def test_unlabeled_hex_blob_still_rejected(self):
+        blob = "0bbc8ed36a571a31bea861747c91722946b67c5fa352eb4bd39bb9aa94c73f93"
+        record = GOOD_RECORD.replace("# Notes", f"# Notes\n\nMystery value: {blob}")
+        with tempfile.TemporaryDirectory() as tmp:
+            work, repo = make_fixtures(Path(tmp), record=record)
+            proc = self.run_validate(work, repo)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("hexadecimal secret-sized string", proc.stdout)
+
 
 class FetchGuardTests(unittest.TestCase):
     def setUp(self):

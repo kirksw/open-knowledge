@@ -47,7 +47,6 @@ SECRET_PATTERNS = [
     (re.compile(r"\bsk-[A-Za-z0-9]{16,}\b"), "API key (sk-)"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "AWS access key"),
     (re.compile(r"\bAIza[0-9A-Za-z_\-]{30,}\b"), "Google API key"),
-    (re.compile(r"\b[a-fA-F0-9]{40,}\b"), "hexadecimal secret-sized string"),
     (re.compile(r"\bCF-Access-Client", re.I), "Cloudflare Access service-token header"),
     (re.compile(r"\bLITELLM_[A-Z_]+\b"), "LiteLLM credential reference"),
     (re.compile(r"\b169\.254\.169\.254\b"), "cloud metadata endpoint address"),
@@ -116,6 +115,19 @@ def scan_content(rel: str, data: bytes, errors: list[str]) -> str | None:
         if match:
             snippet = match.group(0)[:12]
             errors.append(f"{rel}: content matches {label} (near {snippet!r})")
+    # Bare hexadecimal blobs look like credentials, except when the same line
+    # labels them as a content hash (sha1/sha256/sha512/checksum/digest),
+    # which is legitimate provenance for fetched sources.
+    hash_label = re.compile(r"sha-?(?:1|256|512)|checksum|digest", re.I)
+    for match in re.finditer(r"\b[a-fA-F0-9]{40,}\b", text):
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        prefix = text[line_start : match.start()]
+        if hash_label.search(prefix[-40:]):
+            continue
+        errors.append(
+            f"{rel}: content matches hexadecimal secret-sized string (near {match.group(0)[:12]!r})"
+        )
+        break
     return text
 
 
