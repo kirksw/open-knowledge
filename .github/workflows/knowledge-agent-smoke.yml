@@ -47,7 +47,12 @@ jobs:
           auth=(-H "Authorization: Bearer $LITELLM_API_KEY" -H "CF-Access-Client-Id: $CF_ACCESS_CLIENT_ID" -H "CF-Access-Client-Secret: $CF_ACCESS_CLIENT_SECRET" -H "Content-Type: application/json")
           body='{"model":"'"$LITELLM_MODEL_LOW"'","messages":[{"role":"user","content":"Say exactly: ok"}],"max_tokens":16}'
           body_stream='{"model":"'"$LITELLM_MODEL_LOW"'","messages":[{"role":"user","content":"Say exactly: ok"}],"max_tokens":16,"stream":true}'
-          echo "== non-streaming =="
+          echo "== response headers (non-streaming, no follow) =="
+          curl -sS -D - -o /dev/null --max-time 90 "${auth[@]}" -d "$body" "$url" | tr -d '\r' | grep -iE '^HTTP/|^(location|server|cf-mitigated|cf-access|content-type):' || true
+          echo "== follow redirects =="
+          curl -sS -L -o /tmp/one.json -w 'final: %{http_code} %{url_effective}\n' --max-time 90 "${auth[@]}" -d "$body" "$url" || true
+          head -c 400 /tmp/one.json; echo
+          echo "== non-streaming (direct) =="
           code=$(curl -sS -o /tmp/one.json -w '%{http_code}' --max-time 90 "${auth[@]}" -d "$body" "$url")
           echo "HTTP $code"; head -c 700 /tmp/one.json; echo
           echo "== streaming (first 80 SSE lines) =="
