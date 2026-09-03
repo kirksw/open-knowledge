@@ -19,9 +19,21 @@ This repository follows the [Open Knowledge Format v0.2 specification](https://g
 ## Local concept types
 
 - `Source Record`: a provenance concept for one knowledge request; records canonical URLs, access dates, the originating issue, and caveats.
-- `Knowledge Summary`: a public-ready synthesis derived from one or more source records.
+- `Knowledge Summary`: a question-first synthesis derived from one or more source records; it leads with the answer to the originating issue's angle.
+- `Concept`: an atomic, reusable claim under `concepts/`; one concept asserts one claim, accumulates evidence across sources over time, and links related concepts.
 - `Output`: a requested standalone artifact derived from a summary; Markdown or plain text in `outputs/`.
 - `Reference`: repository documentation or a supporting local concept.
+
+## Knowledge model
+
+The bundle decomposes knowledge along concepts, not sources:
+
+- `sources/` is append-only provenance: one record per captured source.
+- `docs/` is append-only summaries: one question-first page per knowledge request, linking its concepts.
+- `concepts/` is the growing wiki layer: concept pages are created once and updated as later sources add, support, or contest the claim.
+- A concept update may add sources and evidence but must not drop a source already recorded on it; superseded claims are marked, not silently removed.
+
+This makes a second paper on the same idea strengthen existing concept pages instead of spawning a parallel digest.
 
 ## Provenance, trust, and lifecycle
 

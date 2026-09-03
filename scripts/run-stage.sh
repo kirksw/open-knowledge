@@ -134,10 +134,17 @@ case "$stage" in
       printf 'Repository root: %s\nScratch directory: %s (all outputs go here)\n' "$repo" "$work"
       printf 'Request: %s\nResearch dossier: %s\nFetch report: %s\n' \
         "$work/request.json" "$work/research.md" "$work/fetch-report.json"
-      printf 'Templates: %s, %s, %s\n' \
-        "$repo/templates/source-record.md" "$repo/templates/wiki-page.md" "$repo/templates/output.md"
+      printf 'Templates: %s, %s, %s, %s\n' \
+        "$repo/templates/source-record.md" "$repo/templates/wiki-page.md" \
+        "$repo/templates/concept.md" "$repo/templates/output.md"
       printf 'Repository policy: %s, %s, %s\nExisting summaries directory: %s\n' \
         "$repo/AGENTS.md" "$repo/docs/okf.md" "$repo/docs/publication-policy.md" "$repo/docs"
+      printf 'Existing concept pages (update rather than duplicate):\n'
+      if compgen -G "$repo/concepts/*.md" >/dev/null; then
+        ls "$repo/concepts"/*.md | sed 's|^|- |'
+      else
+        printf -- '- none yet\n'
+      fi
       printf '\nWrite outputs only under: %s\n' "$work/staged"
     } > "$prompt_file"
     system_prompt="You are the synthesis stage of a deterministic knowledge pipeline. Follow the stage contract exactly; the draft metadata file and staged concept files are the only deliverables."

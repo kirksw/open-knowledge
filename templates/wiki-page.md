@@ -1,7 +1,7 @@
 ---
 type: Knowledge Summary
 title: "<Reader-facing title>"
-description: "<One-sentence, source-grounded synopsis.>"
+description: "<One-sentence answer to the issue's angle.>"
 tags: []
 status: draft
 generated:
@@ -16,17 +16,22 @@ sources:
     title: "<Primary source title>"
 ---
 
-# Takeaway
+# Answer
 
-<!-- The concise answer a reader should retain. -->
+<!-- The direct answer to the issue's stated angle, first.
+     3-6 sentences, each material claim footnoted, e.g. [^primary].
+     A reader who stops here leaves satisfied. -->
 
-# What it is
+# Key concepts
 
-<!-- Source-grounded description with keyed footnotes for material claims, e.g. [^primary]. -->
+<!-- Bullet list of the reusable concepts this entry contributes or updates,
+     each linked to its concept page, e.g.:
+     - [Visible-feedback overfitting](/concepts/visible-feedback-overfitting.md) -->
 
-# Why it matters
+# Evidence
 
-<!-- Interpretation clearly separated from source claims. -->
+<!-- The source-grounded findings that support the answer, condensed,
+     with keyed footnotes for material claims. -->
 
 # Caveats
 

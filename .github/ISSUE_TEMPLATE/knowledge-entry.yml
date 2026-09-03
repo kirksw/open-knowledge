@@ -6,7 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Request a public knowledge entry: a source record, a reader-facing summary, and optionally one output artifact.
+        Request a public knowledge entry: a source record, a reader-facing summary that answers your angle, and optionally one output artifact.
+        Every run also extracts or updates reusable concept pages under concepts/.
         A run starts only after the repository owner applies the `knowledge:ready` label.
 
         Issues are public.

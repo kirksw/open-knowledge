@@ -7,10 +7,11 @@ against repository policy and writes ``validation.json`` plus, on success,
 
 Validation is read-only, offline, and fails closed. It rejects changes that:
 
-- target paths outside ``sources/``, ``docs/``, and ``outputs/``;
+- target paths outside ``sources/``, ``docs/``, ``concepts/``, and ``outputs/``;
 - use disallowed file types, hidden files, or reserved OKF filenames;
-- do not match the deliverables declared in ``request.json``;
-- overwrite files that already exist on the default branch checkout;
+- do not match the deliverables declared in ``request.json`` (plus 1-8 concept pages);
+- overwrite files that already exist on the default branch, except concept
+  updates that keep every previously recorded source (accumulation);
 - fail OKF v0.2 frontmatter rules or the per-type template contract;
 - cite a footnote source ID missing from the ``sources`` frontmatter;
 - contain credentials, private addresses, oversized or binary content;
@@ -33,12 +34,14 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mini_yaml import MiniYAMLError, split_frontmatter  # noqa: E402
 
-ALLOWED_ROOTS = {"sources": ".md", "docs": ".md", "outputs": None}  # None = per-file rule
-OUTPUT_EXTS = {".md", ".txt"}
+ALLOWED_ROOTS = {"sources": ".md", "docs": ".md", "concepts": ".md", "outputs": None}  # None = per-file rule
+OUTPUT_EXTS = {"md", ".txt"}
 RESERVED_NAMES = {"index.md", "log.md"}
 MAX_FILE_BYTES = 300 * 1024
 MAX_TOTAL_BYTES = 1024 * 1024
-REQUIRED_SECTIONS = ("Takeaway", "What it is", "Why it matters", "Caveats", "References")
+SUMMARY_SECTIONS = ("Answer", "Key concepts", "Evidence", "Caveats", "References")
+CONCEPT_SECTIONS = ("Statement", "Evidence", "Caveats", "Related")
+MAX_CONCEPTS = 8
 
 SECRET_PATTERNS = [
     (re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY( BLOCK)?-----"), "private key material"),
@@ -181,7 +184,8 @@ def check_generated(fm: dict, rel: str, errors: list[str]) -> None:
             errors.append(f"{rel}: generated.at is not an ISO-8601 timestamp")
 
 
-def check_common_frontmatter(fm: dict, rel: str, expected_type: str, errors: list[str]) -> None:
+def check_common_frontmatter(fm: dict, rel: str, expected_type: str, errors: list[str],
+                             description_optional=False) -> None:
     if fm is None:
         errors.append(f"{rel}: missing OKF frontmatter")
         return
@@ -189,6 +193,8 @@ def check_common_frontmatter(fm: dict, rel: str, expected_type: str, errors: lis
         errors.append(f"{rel}: type must be {expected_type!r}, got {fm.get('type')!r}")
     for fieldname in ("title", "description"):
         value = fm.get(fieldname)
+        if fieldname == "description" and description_optional:
+            continue
         if not isinstance(value, str) or not value.strip():
             errors.append(f"{rel}: {fieldname} must be a non-empty string")
     if fm.get("status") != "draft":
@@ -197,6 +203,41 @@ def check_common_frontmatter(fm: dict, rel: str, expected_type: str, errors: lis
         errors.append(f"{rel}: verified may only be added by a human or deterministic check")
     check_generated(fm, rel, errors)
     sources_ids(fm, rel, errors)
+
+
+def concept_update_allowed(target: Path, staged_path: Path, rel: str, errors: list[str]) -> bool:
+    """A concept page may be updated, but only over an existing Concept whose
+    recorded sources never shrink (deterministic accumulation guarantee)."""
+    try:
+        existing_fm, _ = split_frontmatter(target.read_text(encoding="utf-8"))
+        staged_fm, _ = split_frontmatter(staged_path.read_text(encoding="utf-8"))
+    except (MiniYAMLError, OSError, UnicodeDecodeError) as exc:
+        errors.append(f"{rel}: existing or staged concept could not be parsed: {exc}")
+        return False
+    if not isinstance(existing_fm, dict) or not isinstance(staged_fm, dict):
+        return False
+    if existing_fm.get("type") != "Concept":
+        errors.append(f"{rel}: refusing to overwrite a non-Concept file at this path")
+        return False
+    if staged_fm.get("type") != "Concept":
+        return False
+    existing_resources = {
+        e.get("resource")
+        for e in (existing_fm.get("sources") or [])
+        if isinstance(e, dict)
+    }
+    staged_resources = {
+        e.get("resource")
+        for e in (staged_fm.get("sources") or [])
+        if isinstance(e, dict)
+    }
+    dropped = existing_resources - staged_resources
+    if dropped:
+        errors.append(
+            f"{rel}: concept update must not drop previously recorded sources ({', '.join(sorted(map(str, dropped)))})"
+        )
+        return False
+    return True
 
 
 def validate_file(path: Path, rel: str, request: dict, repo_root: Path, errors: list[str]) -> None:
@@ -240,7 +281,34 @@ def validate_file(path: Path, rel: str, request: dict, repo_root: Path, errors: 
                 errors.append(f"{rel}: body must link the source record {record_resource}")
             headings = re.findall(r"^#{1,6}\s+(.+?)\s*$", body, re.MULTILINE)
             normalized = {h.strip().lower() for h in headings}
-            for section in REQUIRED_SECTIONS:
+            for section in SUMMARY_SECTIONS:
+                if section.lower() not in normalized:
+                    errors.append(f"{rel}: missing required section '# {section}'")
+            check_citations(body, fm, rel, errors)
+    elif pure.parts[0] == "concepts":
+        check_common_frontmatter(fm, rel, "Concept", errors, description_optional=True)
+        if fm:
+            statement = fm.get("statement")
+            if not isinstance(statement, str) or not statement.strip():
+                errors.append(f"{rel}: statement must be a non-empty one-sentence claim")
+            entries = sources_ids(fm, rel, errors)
+            record_resources = {
+                e.get("resource") for e in entries if isinstance(e, dict) and e.get("resource", "").startswith("/sources/")
+            }
+            if not record_resources:
+                errors.append(f"{rel}: sources frontmatter must reference at least one /sources/ record")
+            related = fm.get("related", [])
+            if related is None:
+                related = []
+            if not isinstance(related, list):
+                errors.append(f"{rel}: related must be a list of /concepts/ paths")
+            else:
+                for link in related:
+                    if not isinstance(link, str) or not re.match(r"^/concepts/[a-z0-9-]+\.md$", link):
+                        errors.append(f"{rel}: related entries must be /concepts/<slug>.md paths")
+            headings = re.findall(r"^#{1,6}\s+(.+?)\s*$", body, re.MULTILINE)
+            normalized = {h.strip().lower() for h in headings}
+            for section in CONCEPT_SECTIONS:
                 if section.lower() not in normalized:
                     errors.append(f"{rel}: missing required section '# {section}'")
             check_citations(body, fm, rel, errors)
@@ -291,8 +359,14 @@ def validate() -> int:
     if deliverables["output"]["requested"]:
         expected[f"outputs/{deliverables['output']['filename']}"] = True
 
+    concept_files = [rel for rel in staged_files if PurePosixPath(rel).parts[0] == "concepts"]
+    if not (1 <= len(concept_files) <= MAX_CONCEPTS):
+        errors.append(
+            f"concepts: staged runs must extract between 1 and {MAX_CONCEPTS} concept pages (found {len(concept_files)})"
+        )
+
     for rel in staged_files:
-        if rel not in expected:
+        if rel not in expected and PurePosixPath(rel).parts[0] != "concepts":
             errors.append(f"{rel}: staged file is not part of the requested deliverables")
     for rel in expected:
         if rel not in staged_files:
@@ -305,7 +379,10 @@ def validate() -> int:
         pure = check_path(rel, errors)
         target = repo_root / rel if pure else None
         if pure is not None and target is not None and target.exists():
-            errors.append(f"{rel}: a file already exists at this path on the default branch")
+            if pure.parts[0] == "concepts" and concept_update_allowed(target, path, rel, errors):
+                pass  # concept update: allowed, accumulation already checked
+            else:
+                errors.append(f"{rel}: a file already exists at this path on the default branch")
         if pure is None:
             continue
         size = path.stat().st_size

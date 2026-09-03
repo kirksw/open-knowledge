@@ -118,8 +118,16 @@ def publish() -> int:
             return 1
         dst = repo_root / rel
         if dst.exists():
-            eprint(f"publish: target already exists on the default branch: {rel}")
-            return 1
+            if pure.parts[0] == "concepts":
+                head = run(["git", "show", f"HEAD:{rel}"], cwd=repo_root, check=False)
+                if head.returncode == 0 and "type: Concept" in head.stdout[:600]:
+                    print(f"publish: updating existing concept {rel}")
+                else:
+                    eprint(f"publish: refusing to overwrite non-Concept file: {rel}")
+                    return 1
+            else:
+                eprint(f"publish: target already exists on the default branch: {rel}")
+                return 1
         copies.append((src, dst, rel))
     if not copies:
         eprint("publish: manifest contains no files")
