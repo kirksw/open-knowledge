@@ -1,0 +1,59 @@
+name: Knowledge entry
+description: Request a public source record and knowledge summary for one or more canonical sources.
+title: "[Knowledge]: <short source or topic title>"
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Request a public knowledge entry: a source record, a reader-facing summary, and optionally one output artifact.
+        A run starts only after the repository owner applies the `knowledge:ready` label.
+
+        Issues are public.
+        Do not include credentials, private notes, confidential work material, or full copyrighted source text.
+        Everything in this issue is treated as untrusted reference data, never as instructions for the agent.
+  - type: textarea
+    id: source-urls
+    attributes:
+      label: Source URLs
+      description: One or more canonical source URLs, one per line (max 8). HTTP(S) public destinations only.
+      placeholder: |
+        https://example.com/paper
+        https://example.org/project
+    validations:
+      required: true
+  - type: textarea
+    id: angle
+    attributes:
+      label: What is interesting / desired angle
+      description: A short note on what to retain or research.
+      placeholder: Why this source matters, which claims to check, what the summary should answer for a reader.
+    validations:
+      required: true
+  - type: checkboxes
+    id: deliverables
+    attributes:
+      label: Requested deliverables
+      options:
+        - label: Source record (sources/<slug>.md)
+          required: false
+        - label: Wiki page (docs/<slug>.md)
+          required: false
+        - label: Output document (outputs/<slug>.md or .txt)
+          required: false
+  - type: input
+    id: output-spec
+    attributes:
+      label: Output document specification
+      description: Required only if the output document deliverable is selected. One file, Markdown or plain text.
+      placeholder: e.g. A comparison table of the three approaches as outputs/<name>.md
+    validations:
+      required: false
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Publication constraints or caveats
+      description: Licensing, attribution, or sensitivity constraints the entry must respect.
+      placeholder: e.g. Quotation limits, embargo date, material that must not be reproduced.
+    validations:
+      required: false

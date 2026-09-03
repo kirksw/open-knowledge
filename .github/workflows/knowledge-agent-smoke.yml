@@ -1,0 +1,45 @@
+name: Knowledge Agent Smoke
+
+# Owner-triggered connectivity check for the Pi + LiteLLM + Cloudflare
+# Access path. Prints no credentials; a success means the provider
+# configuration, service token, and virtual key work end to end.
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      PI_VERSION: 0.84.4
+      NODE_VERSION: "22"
+      PYTHON_VERSION: "3.12"
+      LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+      LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      LITELLM_MODEL_LOW: ${{ vars.LITELLM_MODEL_LOW }}
+      LITELLM_MODEL_HIGH: ${{ vars.LITELLM_MODEL_HIGH }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Pi
+        run: npm install -g @earendil-works/pi-coding-agent@${{ env.PI_VERSION }}
+      - name: Run smoke stage
+        env:
+          WORK_DIR: /tmp/knowledge-smoke
+          REPO_ROOT: ${{ github.workspace }}
+        run: |
+          mkdir -p "$WORK_DIR"
+          bash scripts/run-stage.sh smoke
+      - name: Report
+        run: |
+          echo "smoke check passed: Pi reached the LiteLLM model through Cloudflare Access"

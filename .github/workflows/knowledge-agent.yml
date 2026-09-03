@@ -1,0 +1,407 @@
+name: Knowledge Agent
+
+# Trusted-gate pipeline: a GitHub issue labeled knowledge:ready by the
+# repository owner becomes a reviewable pull request with a source record,
+# a knowledge summary, and an optional output artifact.
+# The agent never merges a pull request.
+
+on:
+  issues:
+    types: [labeled]
+
+permissions: {}
+
+concurrency:
+  group: knowledge-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+env:
+  # Pinned tool versions for every job that installs tooling.
+  PI_VERSION: 0.84.4
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # Trusted workflow gate: run only for an explicit owner action.
+  gate:
+    if: >-
+      github.event_name == 'issues' &&
+      github.event.label.name == 'knowledge:ready' &&
+      github.event.issue.user.login == 'kirksw' &&
+      github.event.issue.author_association == 'OWNER' &&
+      github.actor == 'kirksw'
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Report accepted run
+        run: |
+          echo "trusted knowledge run accepted"
+          echo "issue: #${{ github.event.issue.number }}"
+
+  # Apply agent:working atomically (dedupe) after re-verifying trust live.
+  mark-working:
+    needs: gate
+    if: >-
+      !cancelled() && needs.gate.result == 'success'
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    outputs:
+      proceed: ${{ steps.mark.outputs.proceed }}
+      duplicate: ${{ steps.mark.outputs.duplicate }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Mark issue as working
+        id: mark
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/mark_working.py --issue "${{ github.event.issue.number }}" --owner kirksw
+
+  # Deterministic coordinator: parse the issue form into request.json or a
+  # clarification request.
+  coordinator:
+    needs: mark-working
+    if: >-
+      !cancelled() && !failure() &&
+      needs.mark-working.outputs.proceed == 'true' &&
+      needs.mark-working.outputs.duplicate != 'true'
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      mode: ${{ steps.outcome.outputs.mode }}
+      output_requested: ${{ steps.outcome.outputs.output_requested }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Coordinate request
+        run: python3 scripts/coordinator.py --event-file "$GITHUB_EVENT_PATH" --repo-root . --work-dir .work
+      - name: Record outcome
+        id: outcome
+        run: |
+          if [ -f .work/clarification.json ]; then
+            echo "mode=clarification" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=ok" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -f .work/request.json ] && python3 -c "import json,sys; r=json.load(open('.work/request.json')); sys.exit(0 if r['deliverables']['output']['requested'] else 1)"; then
+            echo "output_requested=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "output_requested=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload work
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: work-coordinator
+          path: .work
+          include-hidden-files: true
+          retention-days: 7
+
+  # Deterministic clarification commenter (coordinator or agent question).
+  clarify:
+    needs: [coordinator, synthesis, output]
+    if: >-
+      !cancelled() && !failure() &&
+      (needs.coordinator.outputs.mode == 'clarification' ||
+       needs.synthesis.outputs.mode == 'clarification' ||
+       needs.output.outputs.mode == 'clarification')
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Download coordinator work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: work-coordinator
+          path: .work
+        continue-on-error: true
+      - name: Download synthesis work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: work-synthesis
+          path: .work
+        continue-on-error: true
+      - name: Download output work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: work-output
+          path: .work
+        continue-on-error: true
+      - name: Post clarification
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/comment.py --mode clarify --work-dir .work --issue "${{ github.event.issue.number }}"
+
+  # Research: deterministic SSRF-guarded fetch, then a sandboxed Pi session
+  # (read/write tools only, no network) over the local corpus.
+  research:
+    needs: coordinator
+    if: >-
+      !cancelled() && !failure() &&
+      needs.coordinator.outputs.mode == 'ok'
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+      LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      LITELLM_MODEL_LOW: ${{ vars.LITELLM_MODEL_LOW }}
+      LITELLM_MODEL_HIGH: ${{ vars.LITELLM_MODEL_HIGH }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Pi
+        run: npm install -g @earendil-works/pi-coding-agent@${{ env.PI_VERSION }}
+      - name: Install PDF text extraction
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+        continue-on-error: true
+      - name: Download coordinator work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: work-coordinator
+          path: .work
+      - name: Run research stage
+        env:
+          WORK_DIR: .work
+          REPO_ROOT: ${{ github.workspace }}
+        run: bash scripts/run-stage.sh research
+      - name: Upload work
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: work-research
+          path: .work
+          include-hidden-files: true
+          retention-days: 7
+
+  # Synthesis: staged concept files plus draft.json, or one clarification.
+  synthesis:
+    needs: research
+    if: >-
+      !cancelled() && !failure() &&
+      needs.research.result == 'success'
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      mode: ${{ steps.outcome.outputs.mode }}
+    env:
+      LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+      LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      LITELLM_MODEL_LOW: ${{ vars.LITELLM_MODEL_LOW }}
+      LITELLM_MODEL_HIGH: ${{ vars.LITELLM_MODEL_HIGH }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Pi
+        run: npm install -g @earendil-works/pi-coding-agent@${{ env.PI_VERSION }}
+      - name: Download research work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: work-research
+          path: .work
+      - name: Run synthesis stage
+        env:
+          WORK_DIR: .work
+          REPO_ROOT: ${{ github.workspace }}
+        run: bash scripts/run-stage.sh synthesis
+      - name: Record outcome
+        id: outcome
+        run: |
+          mode=$(python3 -c "import json; print(json.load(open('.work/draft.json'))['mode'])")
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+      - name: Upload work
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: work-synthesis
+          path: .work
+          include-hidden-files: true
+          retention-days: 7
+
+  # Optional output artifact, only when the issue requested one.
+  output:
+    needs: [coordinator, synthesis]
+    if: >-
+      !cancelled() && !failure() &&
+      needs.coordinator.outputs.output_requested == 'true' &&
+      needs.synthesis.outputs.mode == 'draft'
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.outcome.outputs.mode }}
+    env:
+      LITELLM_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+      LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+      CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
+      CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+      LITELLM_MODEL_LOW: ${{ vars.LITELLM_MODEL_LOW }}
+      LITELLM_MODEL_HIGH: ${{ vars.LITELLM_MODEL_HIGH }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install Pi
+        run: npm install -g @earendil-works/pi-coding-agent@${{ env.PI_VERSION }}
+      - name: Download synthesis work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: work-synthesis
+          path: .work
+      - name: Run output stage
+        env:
+          WORK_DIR: .work
+          REPO_ROOT: ${{ github.workspace }}
+        run: bash scripts/run-stage.sh output
+      - name: Record outcome
+        id: outcome
+        run: |
+          mode=$(python3 -c "import json; print(json.load(open('.work/draft.json'))['mode'])")
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
+      - name: Upload work
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: work-output
+          path: .work
+          include-hidden-files: true
+          retention-days: 7
+
+  # Deterministic validation: OKF, citations, paths, secrets, manifest.
+  validate:
+    needs: [synthesis, output]
+    if: >-
+      !cancelled() && !failure() &&
+      needs.synthesis.outputs.mode == 'draft' &&
+      (needs.output.result == 'skipped' || needs.output.outputs.mode == 'draft')
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      approved: ${{ steps.outcome.outputs.approved }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Download synthesis work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: work-synthesis
+          path: .work
+      - name: Download output work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: work-output
+          path: .work
+        continue-on-error: true
+      - name: Validate staged artifacts
+        run: python3 scripts/validate-run.py --work-dir .work --repo-root .
+      - name: Record outcome
+        id: outcome
+        if: always()
+        run: |
+          if [ -f .work/manifest.json ]; then
+            echo "approved=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "approved=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Upload work
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: work-validate
+          path: .work
+          include-hidden-files: true
+          retention-days: 7
+
+  # Deterministic publisher: branch, commit, pull request, comment, labels.
+  publish:
+    needs: validate
+    if: >-
+      !cancelled() && !failure() &&
+      needs.validate.outputs.approved == 'true'
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Download validated work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: work-validate
+          path: .work
+      - name: Publish pull request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/publish.py --work-dir .work --repo-root .
+
+  # Deterministic failure notifier: agent:failed plus a fixed comment.
+  notify-failed:
+    needs: [mark-working, coordinator, clarify, research, synthesis, output, validate, publish]
+    if: >-
+      !cancelled() && failure() &&
+      (needs.mark-working.result == 'failure' ||
+       needs.mark-working.outputs.proceed == 'true')
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Download validation work
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: work-validate
+          path: .work
+        continue-on-error: true
+      - name: Post failure notice
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/comment.py --mode failed --work-dir .work --issue "${{ github.event.issue.number }}"
