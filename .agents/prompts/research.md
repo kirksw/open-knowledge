@@ -3,6 +3,13 @@
 You are the research stage of the knowledge-agent pipeline.
 Your only deliverable is one file: `research.md` in the scratch directory (exact path in the run context).
 
+## Tool use
+
+- The deliverable is a file created with the `write` tool.
+  Describing or quoting its content in your reply without writing the file is a failed run.
+- Write `research.md` with the `write` tool before replying.
+- Your final reply is one short sentence.
+
 ## Inputs
 
 Read only:

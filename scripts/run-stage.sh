@@ -177,20 +177,14 @@ if [ "$stage" = "smoke" ]; then
   exit 0
 fi
 
-pi --print --mode text --no-session --no-extensions --no-skills \
-   --no-prompt-templates --no-themes --no-context-files --no-approve --offline \
-   --provider litellm --model "$model_id" \
-   --tools read,write \
-   --append-system-prompt "$system_prompt" \
-   "@$prompt_file"
-
-# Deterministic post-checks per stage.
-case "$stage" in
-  research)
-    [ -s "$work/research.md" ] || { echo "run-stage: research.md was not written" >&2; exit 1; }
-    ;;
-  synthesis|output)
-    python3 - "$work" "$stage" <<'PYEOF'
+# Deterministic post-checks per stage; returns nonzero when outputs are missing.
+verify_stage() {
+  case "$stage" in
+    research)
+      [ -s "$work/research.md" ]
+      ;;
+    synthesis|output)
+      python3 - "$work" "$stage" <<'PYEOF'
 import json
 import sys
 from pathlib import Path
@@ -229,7 +223,34 @@ else:
     if not expected.is_file():
         sys.exit(f"run-stage: expected output artifact missing: staged/outputs/{filename}")
 PYEOF
-    ;;
-esac
+      ;;
+  esac
+}
+
+# One automatic retry: some models describe deliverables instead of writing
+# them; the nudge converts that failure into a real write on the second pass.
+max_attempts=2
+attempt=1
+while true; do
+  set +e
+  pi --print --mode text --no-session --no-extensions --no-skills \
+     --no-prompt-templates --no-themes --no-context-files --no-approve --offline \
+     --provider litellm --model "$model_id" \
+     --tools read,write \
+     --append-system-prompt "$system_prompt" \
+     "@$prompt_file"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ] && verify_stage; then
+    break
+  fi
+  if [ "$attempt" -ge "$max_attempts" ]; then
+    echo "run-stage: $stage attempt $attempt failed (pi exit $rc); outputs missing" >&2
+    exit 1
+  fi
+  echo "run-stage: $stage attempt $attempt did not produce the required outputs; retrying" >&2
+  attempt=$((attempt + 1))
+  printf '\n\n## Retry notice\n\nThe previous attempt described the deliverables without writing them.\nCall the write tool and create every required file now. Keep the final reply to one sentence.\n' >> "$prompt_file"
+done
 
 echo "run-stage: $stage stage completed"
