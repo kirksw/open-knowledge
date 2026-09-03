@@ -27,19 +27,19 @@ Owner opens a *Knowledge entry* issue (issue form)
 ```
 
 A clarification stops the run: the pipeline posts the single question, applies `agent:needs-info`, and removes `agent:working`.
-Answer by editing the issue or commenting, remove `agent:needs-info`, then reapply `knowledge:ready` to start a fresh run.
+Answer by editing the issue or commenting, then toggle the `knowledge:ready` label off and on again to start a fresh run.
 
 ## Labels
 
 | Label | Meaning |
 | --- | --- |
-| `knowledge:ready` | Explicit owner permission to process the issue; reapplying it starts a new run. |
+| `knowledge:ready` | Explicit owner permission to process the issue; adding the label starts a run, so toggling it off and on restarts one. |
 | `agent:working` | An accepted run is active; duplicate starts are skipped. |
 | `agent:needs-info` | The agent asked one blocking question. |
 | `agent:pr-open` | A reviewable pull request exists. |
 | `agent:failed` | A recoverable infrastructure or validation failure needs attention. |
 
-If a run dies without cleanup (rare), remove `agent:working` manually and reapply `knowledge:ready`.
+If a run dies without cleanup (rare), remove `agent:working` manually, then toggle `knowledge:ready` off and on again.
 
 ## One-time setup
 
@@ -121,5 +121,6 @@ Live tests to perform after setup:
 
 - **Run skipped for an owner issue**: check the four gate conditions; the most common miss is applying a different label than `knowledge:ready`.
 - **`agent:failed` with missing-configuration errors**: the secrets or the `LITELLM_MODEL_LOW`/`LITELLM_MODEL_HIGH` variables are unset; see *One-time setup*.
-- **Validation rejected the draft**: the failure comment lists the deterministic errors; fix the issue (or reapply `knowledge:ready` after editing) rather than hand-editing staged files, which are ephemeral.
-- **Stuck `agent:working`**: remove the label manually and reapply `knowledge:ready`.
+- **Validation rejected the draft**: the failure comment lists the deterministic errors; fix the cause (for example edit the issue), then toggle `knowledge:ready` off and on again rather than hand-editing staged files, which are ephemeral.
+- **Toggling `knowledge:ready` does nothing**: the label must actually leave and return; if it never left, adding it again creates no `labeled` event and no run.
+- **Stuck `agent:working`**: remove the label manually, then toggle `knowledge:ready` off and on again.

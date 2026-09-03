@@ -37,8 +37,9 @@ def eprint(*args):
     print(*args, file=sys.stderr)
 
 
-def run(cmd: list[str], *, check=True, input_text: str | None = None) -> subprocess.CompletedProcess:
-    proc = subprocess.run(cmd, capture_output=True, text=True, input=input_text)
+def run(cmd: list[str], *, check=True, input_text: str | None = None,
+        cwd: Path | None = None) -> subprocess.CompletedProcess:
+    proc = subprocess.run(cmd, capture_output=True, text=True, input=input_text, cwd=cwd)
     if check and proc.returncode != 0:
         raise RuntimeError(
             f"command failed ({' '.join(cmd[:4])}...): {proc.stderr.strip() or proc.stdout.strip()}"
@@ -214,7 +215,7 @@ ISSUE_COMMENT_TEMPLATE = """A reviewable pull request has been opened for this k
 
 Changed files: {files}
 
-The agent does not merge pull requests; please review and merge, or close and reapply `knowledge:ready` after updating this issue.
+The agent does not merge pull requests; please review and merge, or close and toggle the `knowledge:ready` label off and on again after updating this issue.
 """
 
 if __name__ == "__main__":

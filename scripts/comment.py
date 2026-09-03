@@ -34,7 +34,7 @@ CLARIFY_TEMPLATE = """The knowledge agent needs one clarification before it can 
 
 > {question}
 
-Please answer by editing or commenting on this issue, remove the `agent:needs-info` label, then reapply `knowledge:ready` to restart the run.
+Please answer by editing or commenting on this issue, then toggle the `knowledge:ready` label off and on again to restart the run.
 """
 
 FAILED_TEMPLATE = """The knowledge-agent run for this issue failed and needs attention.
@@ -42,7 +42,7 @@ FAILED_TEMPLATE = """The knowledge-agent run for this issue failed and needs att
 - Workflow run: {run_url}
 - The `agent:working` label was removed; this issue now carries `agent:failed`.
 
-Fix the underlying problem (for example repository secrets, model access, or a validation failure below), then remove `agent:failed` and reapply `knowledge:ready` to retry.
+Fix the underlying problem (for example repository secrets, model access, or a validation failure below), then toggle the `knowledge:ready` label off and on again to retry.
 {validation_section}"""
 
 VALIDATION_SECTION_TEMPLATE = """

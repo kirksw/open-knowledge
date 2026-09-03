@@ -220,44 +220,44 @@ def main(argv: list[str]) -> int:
     if not sections and not body.strip():
         return clarify(
             "The issue body is empty. Please edit the issue to use the *Knowledge entry* issue form "
-            "(source URLs, angle, deliverables, constraints), then reapply `knowledge:ready`."
+            "(source URLs, angle, deliverables, constraints), then toggle the `knowledge:ready` label off and on again."
         )
 
     urls_raw = extract_urls(sections.get("urls", ""))
     if not urls_raw:
         return clarify(
             "No canonical source URL was found. Please edit the issue to add at least one public "
-            "http(s) source URL under *Source URLs*, then reapply `knowledge:ready`."
+            "http(s) source URL under *Source URLs*, then toggle the `knowledge:ready` label off and on again."
         )
     if len(urls_raw) > MAX_URLS:
         return clarify(
             f"The issue lists {len(urls_raw)} source URLs; the maximum is {MAX_URLS}. Please edit the "
-            "issue down to the most canonical sources, then reapply `knowledge:ready`."
+            "issue down to the most canonical sources, then toggle the `knowledge:ready` label off and on again."
         )
     bad = [err for url in urls_raw if (err := check_url_syntax(url))]
     if bad:
         return clarify(
             "A source URL could not be accepted: " + "; ".join(bad)
-            + ". Please edit the issue, then reapply `knowledge:ready`."
+            + ". Please edit the issue, then toggle the `knowledge:ready` label off and on again."
         )
 
     angle = sections.get("angle", "").strip()
     if not angle:
         return clarify(
             "The research angle is empty. Please edit the issue to describe briefly what is interesting "
-            "or what the summary should answer, then reapply `knowledge:ready`."
+            "or what the summary should answer, then toggle the `knowledge:ready` label off and on again."
         )
 
     deliverables, missing = parse_deliverables(sections.get("deliverables", ""))
     if missing:
         return clarify(
             "The deliverables checkboxes are missing. Please edit the issue using the *Knowledge entry* "
-            "form and select the requested deliverables, then reapply `knowledge:ready`."
+            "form and select the requested deliverables, then toggle the `knowledge:ready` label off and on again."
         )
     if not any(deliverables.values()):
         return clarify(
             "No deliverables are selected. Please select at least one of source record, wiki page, or "
-            "output document, then reapply `knowledge:ready`."
+            "output document, then toggle the `knowledge:ready` label off and on again."
         )
 
     output_requested = deliverables["output"]
@@ -266,7 +266,7 @@ def main(argv: list[str]) -> int:
     if output_requested and not output_spec:
         return clarify(
             "The output document deliverable is selected but its specification is empty. Please edit the "
-            "issue to describe the single Markdown or plain-text artifact wanted, then reapply `knowledge:ready`."
+            "issue to describe the single Markdown or plain-text artifact wanted, then toggle the `knowledge:ready` label off and on again."
         )
 
     request = {
