@@ -249,6 +249,9 @@ while true; do
   rc=$?
   set -e
   if [ "$rc" -eq 0 ] && verify_stage; then
+    if [ "$stage" = "synthesis" ]; then
+      python3 "$repo/scripts/clean-staged.py" "$work/staged"
+    fi
     break
   fi
   if [ "$attempt" -ge "$max_attempts" ]; then
