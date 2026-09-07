@@ -8,7 +8,7 @@ body:
       value: |
         Request a public knowledge entry: a source record, a reader-facing summary that answers your angle, and optionally one output artifact.
         Every run also extracts or updates reusable concept pages under concepts/.
-        A run starts only after the repository owner applies the `knowledge:ready` label.
+        Issues opened by the repository owner start automatically. The owner can apply `knowledge:ready` to start or restart an existing request.
 
         Issues are public.
         Do not include credentials, private notes, confidential work material, or full copyrighted source text.

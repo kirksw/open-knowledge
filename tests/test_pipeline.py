@@ -28,6 +28,7 @@ def load(name: str):
 
 mini_yaml = load("mini_yaml")
 coordinator = load("coordinator")
+mark_working = load("mark_working")
 
 
 class MiniYAMLTests(unittest.TestCase):
@@ -553,6 +554,17 @@ class ValidatorTests(unittest.TestCase):
             self.assertIn("hexadecimal secret-sized string", proc.stdout)
 
 
+class MarkWorkingTests(unittest.TestCase):
+    def test_owner_opened_knowledge_issue_is_ready_without_label(self):
+        self.assertTrue(mark_working.trigger_is_ready("opened", "[Knowledge]: Paper", set()))
+        self.assertFalse(mark_working.trigger_is_ready("opened", "Bug report", set()))
+
+    def test_labeled_trigger_requires_ready_label(self):
+        self.assertTrue(mark_working.trigger_is_ready(
+            "labeled", "[Knowledge]: Paper", {"knowledge:ready"}))
+        self.assertFalse(mark_working.trigger_is_ready("labeled", "[Knowledge]: Paper", set()))
+
+
 class FetchGuardTests(unittest.TestCase):
     def setUp(self):
         self.fetch = load("fetch-sources")
@@ -599,6 +611,22 @@ class FetchGuardTests(unittest.TestCase):
         finally:
             self.fetch._original_getaddrinfo = original
             self.fetch._pinned.clear()
+
+    def test_arxiv_abstract_prefers_full_text_representations(self):
+        candidates = self.fetch._source_candidates("https://arxiv.org/abs/2310.08560v2")
+        self.assertEqual(candidates, [
+            ("full-text-html", "https://arxiv.org/html/2310.08560v2"),
+            ("full-text-pdf", "https://arxiv.org/pdf/2310.08560v2"),
+            ("abstract", "https://arxiv.org/abs/2310.08560v2"),
+        ])
+
+    def test_arxiv_candidate_detection_is_host_and_path_strict(self):
+        for url in (
+            "https://example.com/abs/2310.08560",
+            "https://arxiv.org.evil.example/abs/2310.08560",
+            "https://arxiv.org/search/?query=2310.08560",
+        ):
+            self.assertEqual(self.fetch._source_candidates(url), [("requested", url)])
 
     def test_html_text_extraction(self):
         parser = self.fetch._HTMLText()
