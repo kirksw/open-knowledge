@@ -29,6 +29,7 @@ def load(name: str):
 mini_yaml = load("mini_yaml")
 coordinator = load("coordinator")
 mark_working = load("mark_working")
+clean_staged = load("clean-staged")
 
 
 class MiniYAMLTests(unittest.TestCase):
@@ -637,6 +638,25 @@ class FetchGuardTests(unittest.TestCase):
         self.assertIn("Hello world", text)
         self.assertIn("Second", text)
         self.assertNotIn("bad()", text)
+
+
+class RunStageTests(unittest.TestCase):
+    def test_cleanup_removes_only_empty_staged_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            staged = Path(tmp)
+            empty = staged / "probe-dummy.md"
+            kept = staged / "docs" / "entry.md"
+            kept.parent.mkdir()
+            empty.touch()
+            kept.write_text("content\n", encoding="utf-8")
+            removed = clean_staged.remove_empty_files(staged)
+            self.assertEqual(removed, [Path("probe-dummy.md")])
+            self.assertFalse(empty.exists())
+            self.assertEqual(kept.read_text(encoding="utf-8"), "content\n")
+
+    def test_synthesis_runs_cleanup_after_verification(self):
+        script = (SCRIPTS / "run-stage.sh").read_text(encoding="utf-8")
+        self.assertIn('python3 "$repo/scripts/clean-staged.py" "$work/staged"', script)
 
 
 class PublishGuardTests(unittest.TestCase):
