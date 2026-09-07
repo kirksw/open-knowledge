@@ -4,7 +4,8 @@
 Re-verifies the trust gate against the live issue (defense in depth beyond
 the workflow-level event conditions), refuses to proceed when another run is
 already active (``agent:working``), then atomically applies ``agent:working``
-and clears ``agent:needs-info``.
+and clears ``agent:needs-info``. Owner-created knowledge issues are accepted
+without a label; labeled starts and restarts still require ``knowledge:ready``.
 
 Writes ``proceed=true|false`` and ``duplicate=true|false`` to the GitHub
 Actions job output file so the workflow can stop cleanly without marking a
@@ -25,6 +26,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from github_ops import gh, issue_labels, repo_from_env, set_labels  # noqa: E402
 
 
+def trigger_is_ready(trigger: str, title: str, labels: set[str]) -> bool:
+    if trigger == "opened":
+        return title.startswith("[Knowledge]:")
+    return "knowledge:ready" in labels
+
+
 def job_output(key: str, value: str) -> None:
     path = os.environ.get("GITHUB_OUTPUT")
     if path:
@@ -36,6 +43,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--issue", type=int, required=True)
     parser.add_argument("--owner", default="kirksw")
+    parser.add_argument("--trigger", choices=("opened", "labeled"), default="labeled")
     args = parser.parse_args(argv)
 
     if not os.environ.get("GH_TOKEN"):
@@ -62,8 +70,8 @@ def main(argv: list[str]) -> int:
         return 0
 
     labels = issue_labels(repo, args.issue)
-    if "knowledge:ready" not in labels:
-        print("mark-working: knowledge:ready is not currently applied; ignoring")
+    if not trigger_is_ready(args.trigger, str(issue.get("title", "")), labels):
+        print(f"mark-working: {args.trigger} trigger is not ready; ignoring")
         job_output("proceed", "false")
         return 0
     if "agent:working" in labels:

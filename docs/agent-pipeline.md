@@ -13,11 +13,11 @@ The agent never merges a pull request.
 
 ```text
 Owner opens a *Knowledge entry* issue (issue form)
-  -> owner applies knowledge:ready
-  -> trusted gate accepts or the run exits silently
+  -> trusted gate starts it automatically
+  -> existing requests can be started or restarted with knowledge:ready
   -> agent:working applied (dedupe)
   -> coordinator parses the form into request.json, or asks one clarification
-  -> deterministic SSRF-guarded fetch of the requested sources
+  -> deterministic SSRF-guarded fetch of the requested sources and recognized full-text representations
   -> research agent writes a dossier (no network, read/write tools only)
   -> synthesis agent stages the record, question-first summary, and concept pages, or asks one clarification
   -> optional output agent stages the requested artifact
@@ -33,7 +33,7 @@ Answer by editing the issue or commenting, then toggle the `knowledge:ready` lab
 
 | Label | Meaning |
 | --- | --- |
-| `knowledge:ready` | Explicit owner permission to process the issue; adding the label starts a run, so toggling it off and on restarts one. |
+| `knowledge:ready` | Owner-only start or restart signal for an existing issue; owner-created knowledge issues start automatically. |
 | `agent:working` | An accepted run is active; duplicate starts are skipped. |
 | `agent:needs-info` | The agent asked one blocking question. |
 | `agent:pr-open` | A reviewable pull request exists. |
@@ -64,7 +64,7 @@ Jobs in `.github/workflows/knowledge-agent.yml`, each with least-privilege `GITH
 
 | Job | Permissions | Role |
 | --- | --- | --- |
-| `gate` | `contents: read` | Workflow-level `if` accepts only `knowledge:ready` labeled by `kirksw` (issue author, `OWNER` association, and actor). |
+| `gate` | `contents: read` | Workflow-level `if` accepts a `[Knowledge]:` issue opened by `kirksw`, or `knowledge:ready` applied by `kirksw`; both require owner authorship and `OWNER` association. |
 | `mark-working` | `contents: read`, `issues: write` | Re-verifies trust against the live issue, refuses duplicates (`agent:working`), applies `agent:working`. |
 | `coordinator` | `contents: read` | Deterministic Python; parses the issue form into `request.json` or `clarification.json`. |
 | `clarify` | `contents: read`, `issues: write` | Posts the single question; swaps `agent:working` for `agent:needs-info`. |
@@ -80,12 +80,13 @@ Cloudflare and LiteLLM secrets are injected only into the three Pi jobs and the 
 
 ## Security model
 
-- **Trust gate**: the workflow runs only for the `issues.labeled` event with all four owner conditions true; `mark-working` re-verifies author, association, and state against the live API.
+- **Trust gate**: the workflow runs for an owner-opened `[Knowledge]:` issue or an owner-applied `knowledge:ready` label; `mark-working` re-verifies author, association, title or label, and state against the live API.
   External users can open issues but cannot start a run.
 - **Untrusted data**: issue bodies, URLs, fetched pages, and PDFs are reference data, never instructions.
   Every stage prompt states this; the deterministic scripts never interpret issue text as code.
 - **Egress**: only `scripts/fetch-sources.py` touches the network.
   It enforces http(s) on ports 80/443, rejects non-global DNS answers (private, loopback, link-local, metadata, CGNAT, multicast, reserved), pins validated answers for the connection to close DNS rebinding, follows at most four revalidated redirects, and caps sizes and timeouts.
+  A requested arXiv abstract URL automatically resolves to its equivalent HTML full text, then PDF, with the abstract as a fallback; these are representations of the approved paper rather than new sources.
   The Pi stages themselves have no network or shell tools at all (`--tools read,write`).
 - **Least privilege per stage**: the coordinator cannot mutate Git; research writes one dossier; synthesis and output write only staged files; validation is read-only; only the publisher gets write credentials, and it copies only manifest-listed, hash-verified paths.
 - **Publisher limits**: it never merges, never touches `.github/`, never overwrites existing files except concept pages that stay `Concept`-typed and keep every previously recorded source, and generates commit messages, pull request bodies, and comments from fixed templates.
@@ -99,6 +100,7 @@ Cloudflare and LiteLLM secrets are injected only into the three Pi jobs and the 
 - Output documents are Markdown (`.md`) or plain text (`.txt`) only; the validator rejects other formats and binaries.
 - The knowledge model decomposes knowledge along concepts: every run extracts or updates 1-8 `Concept` pages under `concepts/`, and summaries lead with the answer to the issue's angle rather than a source description.
   `sources/`, `docs/`, and `outputs/` stay append-only; only concept pages may be updated, and only when they keep every previously recorded source (the deterministic accumulation guarantee).
+- Owner-created `[Knowledge]:` issues start immediately rather than requiring the plan's separate initial label action; `knowledge:ready` remains the owner-only start and restart signal for existing issues.
 - `mark-working` and `notify-failed` are small extra jobs beyond the plan's table so label changes stay minimal-privilege and failures always leave issue feedback.
 - Pi is installed from npm as `@earendil-works/pi-coding-agent` at a pinned exact version (`PI_VERSION` in the workflow), with pinned full-SHA action versions throughout.
 

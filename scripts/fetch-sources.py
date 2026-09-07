@@ -6,6 +6,11 @@ policy, and writes a plain-text corpus plus ``fetch-report.json`` into the
 run scratch directory. The research agent then reads only these local files
 and has no network tools at all.
 
+For recognized scholarly hosts, the requested canonical URL may expand into
+safer equivalent representations. An arXiv ``/abs/`` URL tries the paper's
+HTML, then PDF, then abstract so approving the paper also approves its full
+text without a second clarification.
+
 Egress policy, enforced before any connection:
 
 - http(s) schemes only, and only ports 80 and 443;
@@ -40,7 +45,7 @@ import time
 from datetime import datetime, timezone
 from http.client import HTTPConnection, HTTPSConnection
 from pathlib import Path
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 MAX_BYTES_PER_SOURCE = 5 * 1024 * 1024
 MAX_BYTES_TOTAL = 20 * 1024 * 1024
@@ -54,6 +59,22 @@ USER_AGENT = "open-knowledge-agent/1.0 (+https://github.com/kirksw/open-knowledg
 
 _original_getaddrinfo = socket.getaddrinfo
 _pinned: dict[str, list[tuple]] = {}
+
+
+def _source_candidates(url: str) -> list[tuple[str, str]]:
+    """Return safe representations to try, preferring full text when known."""
+    parts = urlsplit(url)
+    if parts.hostname and parts.hostname.lower() in {"arxiv.org", "www.arxiv.org"}:
+        match = re.fullmatch(r"/abs/(.+)", parts.path)
+        if match:
+            paper_id = quote(match.group(1), safe="/")
+            origin = f"{parts.scheme}://{parts.netloc}"
+            return [
+                ("full-text-html", f"{origin}/html/{paper_id}"),
+                ("full-text-pdf", f"{origin}/pdf/{paper_id}"),
+                ("abstract", url),
+            ]
+    return [("requested", url)]
 
 
 class BlockedDestination(ValueError):
@@ -311,26 +332,35 @@ def main(argv: list[str]) -> int:
     try:
         fetcher = Fetcher(corpus)
         report = []
-        for index, entry in enumerate(request.get("urls", [])):
+        requested = request.get("urls", [])
+        for index, entry in enumerate(requested):
             stem = f"{index:02d}-{entry['id']}"
-            result = fetcher.fetch(entry["url"], stem)
-            report.append(result)
-            status = "ok" if result.get("text_path") else f"unavailable ({result.get('error')})"
-            print(f"fetch: {entry['id']} {entry['url']} -> {status}")
-            time.sleep(1.0)
-        fetched = sum(1 for r in report if r.get("text_path"))
+            candidates = _source_candidates(entry["url"])
+            for candidate_index, (representation, candidate_url) in enumerate(candidates):
+                suffix = "" if candidate_index == 0 else f"-{representation}"
+                result = fetcher.fetch(candidate_url, stem + suffix)
+                result["source_id"] = entry["id"]
+                result["requested_url"] = entry["url"]
+                result["representation"] = representation
+                report.append(result)
+                status = "ok" if result.get("text_path") else f"unavailable ({result.get('error')})"
+                print(f"fetch: {entry['id']} {candidate_url} [{representation}] -> {status}")
+                if result.get("text_path"):
+                    break
+                time.sleep(1.0)
+        fetched_ids = {r["source_id"] for r in report if r.get("text_path")}
         payload = {
             "version": 1,
             "issue": request["issue"]["number"],
-            "fetched": fetched,
-            "requested": len(report),
+            "fetched": len(fetched_ids),
+            "requested": len(requested),
             "total_bytes": fetcher.total_bytes,
             "results": report,
         }
         (work / "fetch-report.json").write_text(
             json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
-        print(f"fetch-sources: {fetched}/{len(report)} sources in corpus")
+        print(f"fetch-sources: {len(fetched_ids)}/{len(requested)} sources in corpus")
         return 0
     finally:
         socket.getaddrinfo = _original_getaddrinfo

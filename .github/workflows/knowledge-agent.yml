@@ -1,13 +1,13 @@
 name: Knowledge Agent
 
-# Trusted-gate pipeline: a GitHub issue labeled knowledge:ready by the
-# repository owner becomes a reviewable pull request with a source record,
-# a knowledge summary, and an optional output artifact.
+# Trusted-gate pipeline: an owner-created knowledge issue, or one explicitly
+# labeled knowledge:ready by the owner, becomes a reviewable pull request with
+# a source record, a knowledge summary, and an optional output artifact.
 # The agent never merges a pull request.
 
 on:
   issues:
-    types: [labeled]
+    types: [opened, labeled]
 
 permissions: {}
 
@@ -22,14 +22,16 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  # Trusted workflow gate: run only for an explicit owner action.
+  # Trusted workflow gate: owner-created knowledge issues start immediately;
+  # the owner-only label remains the explicit start/restart mechanism.
   gate:
     if: >-
       github.event_name == 'issues' &&
-      github.event.label.name == 'knowledge:ready' &&
       github.event.issue.user.login == 'kirksw' &&
       github.event.issue.author_association == 'OWNER' &&
-      github.actor == 'kirksw'
+      github.actor == 'kirksw' &&
+      ((github.event.action == 'opened' && startsWith(github.event.issue.title, '[Knowledge]:')) ||
+       (github.event.action == 'labeled' && github.event.label.name == 'knowledge:ready'))
     permissions:
       contents: read
     runs-on: ubuntu-24.04
@@ -62,7 +64,11 @@ jobs:
         id: mark
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python3 scripts/mark_working.py --issue "${{ github.event.issue.number }}" --owner kirksw
+        run: >-
+          python3 scripts/mark_working.py
+          --issue "${{ github.event.issue.number }}"
+          --owner kirksw
+          --trigger "${{ github.event.action }}"
 
   # Deterministic coordinator: parse the issue form into request.json or a
   # clarification request.
